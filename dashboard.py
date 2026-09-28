@@ -522,17 +522,15 @@ st.dataframe(
 
 
 # --------------------------------------------------
-# 11. MODEL PREDICTION USING EXISTING FASTAPI
+# 11. MODEL PREDICTION USING TRAINED MODEL
 # --------------------------------------------------
 
 st.header("🤖 AQI Prediction")
 
 st.write(
-    "Enter a new observation to request a prediction from your existing "
-    "FastAPI endpoint and trained model."
+    "Enter a new observation to generate a prediction using "
+    "the trained AQI classification model."
 )
-
-API_URL = "http://127.0.0.1:8000/predict"
 
 with st.form("aqi_prediction_form"):
 
@@ -612,91 +610,128 @@ if predict_button:
 
     else:
 
-        payload = {
-            "pollutant_min": pollutant_min,
-            "pollutant_max": pollutant_max,
-            "pollutant_avg": pollutant_avg,
-            "temperature_c": temperature_c,
-            "humidity_percent": humidity_percent,
-            "wind_speed_kmh": wind_speed_kmh,
-            "Digital_Elevation_Model": elevation,
-            "pollutant_id": pollutant_id
-        }
-
         try:
 
-            with st.spinner(
-                "Requesting prediction from FastAPI..."
-            ):
-
-                response = requests.post(
-                    API_URL,
-                    json=payload,
-                    timeout=20
-                )
-
-            if response.ok:
-
-                result = response.json()
-
-                st.success(
-                    "Prediction received."
-                )
-
-                if "prediction" in result:
-
-                    st.metric(
-                        "Predicted AQI",
-                        str(result["prediction"])
-                    )
-
-                elif "aqi" in result:
-
-                    st.metric(
-                        "Predicted AQI",
-                        str(result["aqi"])
-                    )
-
-                if "category" in result:
-
-                    st.metric(
-                        "Predicted Category",
-                        str(result["category"])
-                    )
-
-                if "confidence" in result:
-
-                    st.metric(
-                        "Model Confidence",
-                        str(result["confidence"])
-                    )
-
-                with st.expander(
-                    "Full API response"
-                ):
-                    st.json(result)
-
-            else:
-
-                st.error(
-                    f"API error: HTTP {response.status_code}"
-                )
-
-                st.code(
-                    response.text
-                )
-
-        except requests.exceptions.ConnectionError:
-
-            st.error(
-                "FastAPI is not reachable. Start it in another terminal "
-                "using: uvicorn app:app --reload"
+            # Load the trained model
+            trained_model = joblib.load(
+                "trained_model.pkl"
             )
 
-        except requests.exceptions.RequestException as e:
+            # Create input data using the same feature names
+            # used during model training
+            input_data = pd.DataFrame([{
+                "pollutant_min": pollutant_min,
+                "pollutant_max": pollutant_max,
+                "pollutant_avg": pollutant_avg,
+                "temperature_c": temperature_c,
+                "humidity_percent": humidity_percent,
+                "wind_speed_kmh": wind_speed_kmh,
+                "Digital Elevation Model": elevation,
+                "pollutant_id": pollutant_id
+            }])
+
+            # Generate prediction
+            prediction = trained_model.predict(
+                input_data
+            )[0]
+
+            # Generate prediction probabilities
+            probabilities = trained_model.predict_proba(
+                input_data
+            )[0]
+
+            # Model classes:
+            # 0 = Good
+            # 1 = Not Good
+            if prediction == 0:
+                category = "Good"
+            else:
+                category = "Not Good"
+
+            confidence = probabilities[
+                int(prediction)
+            ]
+
+            st.success(
+                "Prediction generated successfully."
+            )
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.metric(
+                    "Predicted Category",
+                    category
+                )
+
+            with col2:
+
+                st.metric(
+                    "Model Confidence",
+                    f"{confidence:.2%}"
+                )
+
+            with st.expander(
+                "Prediction Details"
+            ):
+
+                st.write(
+                    "Model prediction:",
+                    int(prediction)
+                )
+
+                st.write(
+                    "Input values:"
+                )
+
+                st.dataframe(
+                    input_data,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.write(
+                    "Prediction probabilities:"
+                )
+
+                probability_df = pd.DataFrame({
+                    "Class": [
+                        "Good",
+                        "Not Good"
+                    ],
+                    "Probability": [
+                        probabilities[0],
+                        probabilities[1]
+                    ]
+                })
+
+                probability_df["Probability"] = (
+                    probability_df["Probability"]
+                    .map(lambda x: f"{x:.2%}")
+                )
+
+                st.dataframe(
+                    probability_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+        except FileNotFoundError:
 
             st.error(
-                f"Prediction request failed: {e}"
+                "trained_model.pkl was not found. "
+                "Make sure the trained model is present in the repository."
+            )
+
+        except Exception as e:
+
+            st.error(
+                "Prediction could not be generated."
+            )
+
+            st.code(
+                str(e)
             )
 
 
